@@ -3,7 +3,8 @@ from openpyxl import load_workbook
 from openpyxl import Workbook
 from netmiko import ConnectHandler
 import re
-
+import time
+from datetime import datetime
 
 def sw_version(result, type):
     if type == 'cisco_ios':
@@ -93,6 +94,7 @@ def send_command(hostname, type, address, username, password, command):
 
 def main():
     invent_file = 'data/inventory.xlsx'
+    data_log = 'syslog/log.txt'
     while True:
         print('\n\n\nthis tools is used to help you to collect data related with network')
         print('this tools is still limited based on Cisco device, Sorry :(')
@@ -109,18 +111,32 @@ def main():
             '''create file software inventory'''
             wb = Workbook()
             ws = wb.active
+            swinvent_dir = 'data/software_inventory.xlsx'
             ws.cell(row=1, column=1, value='Hostname')
             ws.cell(row=1, column=2, value='Part Number')
             ws.cell(row=1, column=3, value='Software Version')
 
-            wb.save('data/software_inventory.xlsx')
+            wb.save(swinvent_dir)
             inventories = inventory(invent_file)
             command = 'show version'
+            row = 2
             for d in inventories:
                 output = send_command(d['hostname'], d['type'], d['address'], d['user'], d['pass'], command)
                 sw_inventory = sw_version(output, d['type'])
-
-
+                print('%s : %s --> partnumber : %s, sw_version : %s' % (time_log(), d['hostname'], sw_inventory[1], sw_inventory[0]))
+                log('%s : %s --> %s\n' % (time_log(), d['hostname'], sw_inventory), data_log) 
+                
+                '''load workbook'''
+                wb = load_workbook(swinvent_dir)
+                ws = wb.active
+                ws.cell(row=row, column=1, value=d['hostname'])
+                ws.cell(row=row, column=2, value=sw_inventory[1])
+                ws.cell(row=row, column=3, value=sw_inventory[0])
+                wb.save(swinvent_dir)
+                row += 1
+        else:
+            print('sorry, please choose function above..')
+            time.sleep(3)
 
 if __name__ == '__main__':
     main()
