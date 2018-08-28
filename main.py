@@ -6,43 +6,6 @@ import re
 import time
 from datetime import datetime
 
-def sw_version(result, type):
-    if type == 'cisco_ios':
-        ios_sw_re = re.compile(r'Version (\S+),')
-        ios_pn_re = re.compile(r'Model\s+number\s+:\s+(\S+)')
-
-        ios_sw = ios_sw_re.search(result)
-        ios_pn = ios_pn_re.search(result)
-
-        if ios_sw:
-            sw = ios_sw.group(1)
-            if ios_pn:
-                pn = ios_pn.group(1)
-                return sw,pn
-    elif type == 'cisco_xe':
-        xe_sw_re = re.compile(r'Version (\S+)')
-        xe_pn_re = re.compile(r'cisco (WS-\S+)')
-
-        xe_sw = xe_sw_re.search(result)
-        xe_pn = xe_pn_re.search(result)
-
-        if xe_sw:
-            sw = xe_sw.group(1)
-            if xe_pn:
-                pn = xe_pn.group(1)
-                return sw,pn
-    elif type == 'cisco_nx':
-        nx_sw_re = re.compile(r'system:\s+version\s+(\S+)')
-        nx_pn_re = re.compile(r'cisco (Nexus\w+ \S+)')
-
-        nx_sw = nx_sw_re.search(result)
-        nx_pn = nx_pn_re.search(result)
-
-        if nx_sw:
-            sw = nx_sw.group(1)
-            if nx_pn:
-                pn = nx_pn.group(1)
-                return sw,pn
 
 def time_log():
     time_log_stamp = datetime.now()
@@ -71,26 +34,112 @@ def inventory(filename):
         invent_dic['type'] = ws.cell(row=i, column=3).value
         invent_dic['user'] = ws.cell(row=i, column=4).value
         invent_dic['pass'] = ws.cell(row=i, column=5).value
-
         invents.append(invent_dic)
     return invents
 
-def send_command(hostname, type, address, username, password, command):
-    connecthandler = {
-        'device_type' : type,
-        'ip' : address,
-        'username' : username,
-        'password' : password
-    }
+class SendCommand(object):
+    def __init__(self, hostname, dev_type, address, username, password):
+        self.hostname = hostname
+        self.dev_type = dev_type
+        self.address = address
+        self.username = username
+        self.password = password
 
-    try:
-        netconnect = ConnectHandler(**connecthandler)
-        result = netconnect.send_command(command)
-        return result
+    def command(self, cmd):
+        self.cmd = cmd
+        connecthandler = {
+            'device_type' : self.dev_type,
+            'ip' : self.address,
+            'username' : self.username,
+            'password' : self.password
+        }
 
-    except Exception as msg:
-        result = 'sorry connection to %s was failed, %s' % (hostname, msg)
-        return result
+        try:
+            netconnect = ConnectHandler(**connecthandler)
+            result = netconnect.send_command(self.cmd)
+            return result
+
+        except Exception as msg:
+            result = 'sorry connection to %s was failed, %s' % (hostname, msg)
+            return result
+    
+    def mac_port(self):
+        trk_list = self.trunk_port()
+        mac_cmd = 'show mac address-table dynamic | exclude %s' % '|'.join(trk_list)
+        mac_output = self.command(mac_cmd)
+        mac_re = re.compile(r'\w+\.\w+\.\w+')
+        int_re = re.compile(r'(Fa[\/\d]+|Gi[\/\d]+|Te[\/\d]+)')
+        vlan_re = re.compile(r'(\d+).*')
+        mac_line = mac_output.splitlines()
+        mac_int_list = list()
+        
+        for line in mac_line:
+            data_mac = {
+                    'mac' : None,
+                    'port' : None,
+                    'vlan' : None
+                    }
+            mac = mac_re.search(line)
+            port = int_re.search(line)
+            vlan = vlan_re.search(line)
+
+            if mac and port and vlan:
+                data_mac['mac'] = mac.group()
+                data_mac['port'] = port.group(1)
+                data_mac['vlan'] = vlan.group(1)
+
+                mac_int_list.append(data_mac)
+
+        return mac_int_list
+
+    def trunk_port(self):
+        local_cmd = 'show interface trunk | i trunking'
+        trunk_cmd = self.command(local_cmd)
+        trk_int_re = re.compile(r'(\w+[\/\d]+).*')
+        trk_int = trk_int_re.findall(trunk_cmd)
+
+        return trk_int
+
+    def sw_version(self):
+        local_cmd = 'show version'
+        result = self.command(local_cmd)
+
+        if self.dev_type == 'cisco_ios':
+            ios_sw_re = re.compile(r'Version (\S+),')
+            ios_pn_re = re.compile(r'Model\s+number\s+:\s+(\S+)')
+
+            ios_sw = ios_sw_re.search(result)
+            ios_pn = ios_pn_re.search(result)
+
+            if ios_sw:
+                sw = ios_sw.group(1)
+                if ios_pn:
+                    pn = ios_pn.group(1)
+                    return sw,pn
+        elif self.dev_type == 'cisco_xe':
+            xe_sw_re = re.compile(r'Version (\S+)')
+            xe_pn_re = re.compile(r'cisco (WS-\S+)')
+
+            xe_sw = xe_sw_re.search(result)
+            xe_pn = xe_pn_re.search(result)
+
+            if xe_sw:
+                sw = xe_sw.group(1)
+                if xe_pn:
+                    pn = xe_pn.group(1)
+                    return sw,pn
+        elif self.dev_type == 'cisco_nx':
+            nx_sw_re = re.compile(r'system:\s+version\s+(\S+)')
+            nx_pn_re = re.compile(r'cisco (Nexus\w+ \S+)')
+
+            nx_sw = nx_sw_re.search(result)
+            nx_pn = nx_pn_re.search(result)
+
+            if nx_sw:
+                sw = nx_sw.group(1)
+                if nx_pn:
+                    pn = nx_pn.group(1)
+                    return sw,pn
 
 def main():
     invent_file = 'data/inventory.xlsx'
@@ -118,12 +167,12 @@ def main():
 
             wb.save(swinvent_dir)
             inventories = inventory(invent_file)
-            command = 'show version'
+            cmd = 'show version'
             row = 2
             for d in inventories:
-                output = send_command(d['hostname'], d['type'], d['address'], d['user'], d['pass'], command)
-                sw_inventory = sw_version(output, d['type'])
-                print('%s : %s --> partnumber : %s, sw_version : %s' % (time_log(), d['hostname'], sw_inventory[1], sw_inventory[0]))
+                output = SendCommand(d['hostname'], d['type'], d['address'], d['user'], d['pass'])
+                sw_inventory = output.sw_version() 
+                print('%s : %s --> partnumber : %s, sw version : %s' % (time_log(), d['hostname'], sw_inventory[1], sw_inventory[0]))
                 log('%s : %s --> %s\n' % (time_log(), d['hostname'], sw_inventory), data_log) 
                 
                 '''load workbook'''
@@ -134,6 +183,13 @@ def main():
                 ws.cell(row=row, column=3, value=sw_inventory[0])
                 wb.save(swinvent_dir)
                 row += 1
+        elif input_select == '2':
+            inventories = inventory(invent_file)
+            for d in inventories:
+                output = SendCommand(d['hostname'], d['type'], d['address'], d['user'], d['pass'])
+                mac = output.mac_port()
+                print(str(mac))
+
         else:
             print('sorry, please choose function above..')
             time.sleep(3)
