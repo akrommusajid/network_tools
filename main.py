@@ -37,6 +37,11 @@ def inventory(filename):
         invents.append(invent_dic)
     return invents
 
+def arp_addr(output):
+    arp_re = re.compile(r'\d+\.\d+\.\d+\.\d+')
+    arp = arp_re.findall(output)
+    return arp
+
 class SendCommand(object):
     def __init__(self, hostname, dev_type, address, username, password):
         self.hostname = hostname
@@ -57,12 +62,19 @@ class SendCommand(object):
         try:
             netconnect = ConnectHandler(**connecthandler)
             result = netconnect.send_command(self.cmd)
-            return result
+            netconnect.disconnect()
+            if len(result) == 0:
+                return None
+            else:
+                return result
 
-        except Exception as msg:
-            result = 'sorry connection to %s was failed, %s' % (hostname, msg)
+        except:
+            result = 'sorry connection to %s was failed' % (self.hostname)
             return result
-    
+        '''
+        except (EOFError, SSHException):
+            return None
+        '''
     def mac_port(self):
         trk_list = self.trunk_port()
         mac_cmd = 'show mac address-table dynamic | exclude %s' % '|'.join(trk_list)
@@ -187,8 +199,26 @@ def main():
             inventories = inventory(invent_file)
             for d in inventories:
                 output = SendCommand(d['hostname'], d['type'], d['address'], d['user'], d['pass'])
-                mac = output.mac_port()
-                print(str(mac))
+                macs = output.mac_port()
+                for mac in macs:
+                    mac_add = mac['mac']
+
+                    for e in inventories:
+                        arp_cmd = 'show ip arp | include %s' % mac_add
+                        print('connect to %s' % e['hostname'])
+                        conn = SendCommand(e['hostname'], e['type'], e['address'], e['user'], e['pass'])
+                        arp_output = conn.command(arp_cmd)
+                        if arp_output == None:
+                            continue
+                        else:
+                            arp = arp_addr(arp_output)
+                            mac['addr'] = arp
+                            break
+                        #print(e['address'],e['user'],e['pass'],e['type'])
+                    mac['switch'] = d['hostname']
+                    print(mac)
+                    log('%s : %s\n' % (time_log(),mac), data_log)
+
 
         else:
             print('sorry, please choose function above..')
