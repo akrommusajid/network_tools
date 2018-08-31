@@ -1,4 +1,5 @@
 import sys
+from pprint import pprint
 from openpyxl import load_workbook
 from openpyxl import Workbook
 from netmiko import ConnectHandler
@@ -59,50 +60,95 @@ class SendCommand(object):
             'password' : self.password
         }
 
-        try:
-            netconnect = ConnectHandler(**connecthandler)
-            result = netconnect.send_command(self.cmd)
-            netconnect.disconnect()
-            if len(result) == 0:
-                return None
-            else:
-                return result
-
-        except:
-            result = 'sorry connection to %s was failed' % (self.hostname)
-            return result
-        '''
-        except (EOFError, SSHException):
+        netconnect = ConnectHandler(**connecthandler)
+        result = netconnect.send_command(self.cmd)
+        netconnect.disconnect()
+        if len(result) == 0:
             return None
-        '''
+        else:
+            return result
+
     def mac_port(self):
         trk_list = self.trunk_port()
-        mac_cmd = 'show mac address-table dynamic | exclude %s' % '|'.join(trk_list)
-        mac_output = self.command(mac_cmd)
-        mac_re = re.compile(r'\w+\.\w+\.\w+')
-        int_re = re.compile(r'(Fa[\/\d]+|Gi[\/\d]+|Te[\/\d]+)')
-        vlan_re = re.compile(r'(\d+).*')
-        mac_line = mac_output.splitlines()
-        mac_int_list = list()
-        
-        for line in mac_line:
-            data_mac = {
-                    'mac' : None,
-                    'port' : None,
-                    'vlan' : None
-                    }
-            mac = mac_re.search(line)
-            port = int_re.search(line)
-            vlan = vlan_re.search(line)
+        if self.dev_type == 'cisco_xe':
+            list_trk = list()
+            for trk in trk_list:
+                te_re = re.compile(r'Te[\d\/]+')
+                te = te_re.search(trk)
+                ge_re = re.compile(r'Gi[\d\/]+')
+                ge = ge_re.search(trk)
+                fa_re = re.compile(r'Fa[\d\/]+')
+                fa = fa_re.search(trk)
+                if te:
+                    int_te = trk.replace('Te','TenGigabitEthernet')
+                    list_trk.append(int_te)
+                elif ge:
+                    int_te = trk.replace('Gi','GigabitEthernet')
+                    list_trk.append(trk)
+                elif fa:
+                    int_te = trk.replace('Fa','FastEthernet')
+                    list_trk.append(trk)
+       
+            mac_cmd = 'show mac address-table dynamic | exclude %s' % '|'.join(list_trk)
+            mac_output = self.command(mac_cmd)
+            mac_re = re.compile(r'\w+\.\w+\.\w+')
+            int_re = re.compile(r'(FastEthernet[\/\d]+|GigabitEthernet[\/\d]+|TengigabitEthernet[\/\d]+)')
+            vlan_re = re.compile(r'(\d+|Te[\d\/]+|Gi[\/\d]+|Fa[\/\d+].*)')
+            mac_line = mac_output.splitlines()
+            mac_int_list = list()
 
-            if mac and port and vlan:
-                data_mac['mac'] = mac.group()
-                data_mac['port'] = port.group(1)
-                data_mac['vlan'] = vlan.group(1)
+            for line in mac_line:
+                data_mac = {
+                        'mac' : None,
+                        'port' : None,
+                        'vlan' : None,
+                        'switch' : None,
+                        'addr' : None
+                        }
 
-                mac_int_list.append(data_mac)
+                mac = mac_re.search(line)
+                port = int_re.search(line)
+                vlan = vlan_re.search(line)
 
-        return mac_int_list
+                if mac and port and vlan:
+                    data_mac['mac'] = mac.group()
+                    data_mac['port'] =port.group(1)
+                    data_mac['vlan'] = vlan.group(1)
+                    data_mac['switch'] = self.hostname
+
+                    mac_int_list.append(data_mac)
+            return mac_int_list
+
+        else:
+            mac_cmd = 'show mac address-table dynamic | exclude %s' % '|'.join(trk_list)
+            mac_output = self.command(mac_cmd)
+            mac_re = re.compile(r'\w+\.\w+\.\w+')
+            int_re = re.compile(r'(Fa[\/\d]+|Gi[\/\d]+|Te[\/\d]+)')
+            vlan_re = re.compile(r'(\d+).*')
+            mac_line = mac_output.splitlines()
+            mac_int_list = list()
+            
+            for line in mac_line:
+                data_mac = {
+                        'mac' : None,
+                        'port' : None,
+                        'vlan' : None,
+                        'switch' : None,
+                        'addr': None
+                        }
+                mac = mac_re.search(line)
+                port = int_re.search(line)
+                vlan = vlan_re.search(line)
+
+                if mac and port and vlan:
+                    data_mac['mac'] = mac.group()
+                    data_mac['port'] = port.group(1)
+                    data_mac['vlan'] = vlan.group(1)
+                    data_mac['switch'] = self.hostname
+
+                    mac_int_list.append(data_mac)
+
+            return mac_int_list
 
     def trunk_port(self):
         local_cmd = 'show interface trunk | i trunking'
@@ -153,6 +199,11 @@ class SendCommand(object):
                     pn = nx_pn.group(1)
                     return sw,pn
 
+def int_vlan(output):
+    intvlan_re = re.compile(r'Vlan(\d+)')
+    intvlan = intvlan_re.findall(output)
+
+    return intvlan
 def main():
     invent_file = 'data/inventory.xlsx'
     data_log = 'syslog/log.txt'
@@ -196,30 +247,76 @@ def main():
                 wb.save(swinvent_dir)
                 row += 1
         elif input_select == '2':
-            inventories = inventory(invent_file)
+            dev_inventories = inventory(invent_file)
+            address_invent = 'data/address_inventory.xlsx'
+            wb = Workbook()
+            ws = wb.active
+            ws.cell(row=1, column=1, value='Hostname')
+            ws.cell(row=1, column=2, value='Port')
+            ws.cell(row=1, column=3, value='Mac Address')
+            ws.cell(row=1, column=4, value='Vlan')
+            ws.cell(row=1, column=5, value='IP Address')
+            wb.save(address_invent)
+
+            int_br_cmd = 'show ip interface brief | include .+\..+\..+\..+'
+            inventories = list()
+            print('identifying interface vlan, please wait')
+            for a in dev_inventories:
+                try:
+                    int_br_conn = SendCommand(
+                            hostname=a['hostname'],
+                            dev_type=a['type'],
+                            username=a['user'],
+                            password=a['pass'],
+                            address=a['address']
+                            )
+                    
+                    int_br_output = int_br_conn.command(int_br_cmd)
+                    int_vlans = int_vlan(int_br_output)
+                    if len(int_vlans) != 0:
+                        a['int_vlan'] = int_vlans 
+                    
+                    inventories.append(a)
+                except:
+                    continue
+
+            #pprint(inventories)
+
             for d in inventories:
                 output = SendCommand(d['hostname'], d['type'], d['address'], d['user'], d['pass'])
                 macs = output.mac_port()
+                #pprint('%s -> %s '% (d['hostname'], macs))
+                row = 2
                 for mac in macs:
                     mac_add = mac['mac']
-
+                    
                     for e in inventories:
-                        arp_cmd = 'show ip arp | include %s' % mac_add
-                        print('connect to %s' % e['hostname'])
-                        conn = SendCommand(e['hostname'], e['type'], e['address'], e['user'], e['pass'])
-                        arp_output = conn.command(arp_cmd)
-                        if arp_output == None:
-                            continue
+                        if mac['vlan'] in e['int_vlan']:
+                            arp_cmd = 'show ip arp | include %s' % mac_add
+                            #print('connect to %s' % e['hostname'])
+                            conn = SendCommand(e['hostname'], e['type'], e['address'], e['user'], e['pass'])
+                            arp_output = conn.command(arp_cmd)
+                            if arp_output == None:
+                                continue
+                            else:
+                                arp = arp_addr(arp_output)
+                                mac['addr'] = arp
+                                break
                         else:
-                            arp = arp_addr(arp_output)
-                            mac['addr'] = arp
-                            break
-                        #print(e['address'],e['user'],e['pass'],e['type'])
-                    mac['switch'] = d['hostname']
+                            continue
                     print(mac)
+                    wb = load_workbook(address_invent)
+                    ws = wb.active
+                    ws.cell(row=row, column=1, value=mac['switch'])
+                    ws.cell(row=row, column=2, value=mac['port'])
+                    ws.cell(row=row, column=3, value=mac['mac'])
+                    ws.cell(row=row, column=4, value=mac['vlan'])
+                    if mac['addr'] != None:
+                        ws.cell(row=row, column=5, value=','.join(mac['addr']))
+
+                    wb.save(address_invent)
+                    row += 1
                     log('%s : %s\n' % (time_log(),mac), data_log)
-
-
         else:
             print('sorry, please choose function above..')
             time.sleep(3)
