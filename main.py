@@ -16,7 +16,9 @@ def time_log():
 
 def log(write, filename):
     with open(filename, 'a') as writelog:
-        writelog.write(write)
+        output = '%s :' % time_log()
+        output += write
+        writelog.write(output)
 
 def inventory(filename):
     wb = load_workbook(filename)
@@ -391,28 +393,48 @@ def main():
                 wb.save(traffic_file)
                 print('Collecting data traffic successfully')
         elif input_select == '4':
+            vlan_inventory = 'data/vlan_database.xlsx'
             template = open('template/cisco_show_vlan.template')
             result_template = textfsm.TextFSM(template)
             device_inventories = inventory(invent_file)
             vlan_list = list()
             for host in device_inventories:
-                host_conn = SendCommand(host['hostname'], host['type'], host['address'], host['user'], host['pass'])
-                sh_vlan_cmd = 'show vlan'
-                output = host_conn.command(sh_vlan_cmd)
-                vlan_data = result_template.ParseText(output)
-                for vlan in vlan_data:
-                    vlan_dict = {
-                                'id' : None,
-                                'name' : None,
-                                'status' : None
-                            }
-                    vlan_dict['id'] = vlan[0]
-                    vlan_dict['name'] = vlan[1]
-                    vlan_dict['status'] = vlan[2]
-                    vlan_list.append(vlan_dict)
-                print('%s OK' % host['hostname'])
+                try:
+                    host_conn = SendCommand(host['hostname'], host['type'], host['address'], host['user'], host['pass'])
+                    sh_vlan_cmd = 'show vlan'
+                    output = host_conn.command(sh_vlan_cmd)
+                    vlan_data = result_template.ParseText(output)
+                    for vlan in vlan_data:
+                        vlan_dict = {
+                                    'id' : None,
+                                    'name' : None,
+                                    'status' : None
+                                }
+                        vlan_dict['id'] = vlan[0]
+                        vlan_dict['name'] = vlan[1]
+                        vlan_dict['status'] = vlan[2]
+                        vlan_list.append(vlan_dict)
+                    print('%s : %s OK' % (time_log(), host['hostname']))
+                    log('%s OK\n' % host['hostname'] ,data_log)
+                except:
+                    print('%s : %s NOK' % (time_log(), host['hostname']))
+                    log('%s NOK\n' % host['hostname'] ,data_log)
             vlan_set = list({d['id'] : d for d in vlan_list}.values())
-            pprint(vlan_set)
+            print('saving document ..')
+            wb = Workbook()
+            ws = wb.active
+
+            ws.cell(row=1, column=1, value='Vlan ID')
+            ws.cell(row=1, column=2, value='Name')
+            ws.cell(row=1, column=3, value='Status')
+
+            row=2
+            for data in vlan_set:
+                ws.cell(row=row, column=1, value=data['id'])
+                ws.cell(row=row, column=2, value=data['name'])
+                ws.cell(row=row, column=3, value=data['status'])
+                
+            wb.save(vlan_inventory)
         else:
             print('sorry, please choose function above..')
             time.sleep(3)
