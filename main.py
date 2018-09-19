@@ -433,6 +433,7 @@ def main():
                 ws.cell(row=row, column=1, value=data['id'])
                 ws.cell(row=row, column=2, value=data['name'])
                 ws.cell(row=row, column=3, value=data['status'])
+                row += 1
                 
             wb.save(vlan_inventory)
         else:
