@@ -395,7 +395,6 @@ def main():
         elif input_select == '4':
             vlan_inventory = 'data/vlan_database.xlsx'
             template = open('template/cisco_show_vlan.template')
-            result_template = textfsm.TextFSM(template)
             device_inventories = inventory(invent_file)
             vlan_list = list()
             for host in device_inventories:
@@ -403,6 +402,7 @@ def main():
                     host_conn = SendCommand(host['hostname'], host['type'], host['address'], host['user'], host['pass'])
                     sh_vlan_cmd = 'show vlan'
                     output = host_conn.command(sh_vlan_cmd)
+                    result_template = textfsm.TextFSM(template)
                     vlan_data = result_template.ParseText(output)
                     for vlan in vlan_data:
                         vlan_dict = {
@@ -414,12 +414,15 @@ def main():
                         vlan_dict['name'] = vlan[1]
                         vlan_dict['status'] = vlan[2]
                         vlan_list.append(vlan_dict)
+                    vlan_list = list({d['id'] : d for d in vlan_list}.values())
                     print('%s : %s OK' % (time_log(), host['hostname']))
                     log('%s OK\n' % host['hostname'] ,data_log)
+                    log(str(vlan_data) + '\n', data_log)
                 except:
                     print('%s : %s NOK' % (time_log(), host['hostname']))
                     log('%s NOK\n' % host['hostname'] ,data_log)
-            vlan_set = list({d['id'] : d for d in vlan_list}.values())
+            #print(time_log() + ':')
+            #pprint(vlan_list)
             print('saving document ..')
             wb = Workbook()
             ws = wb.active
@@ -429,8 +432,8 @@ def main():
             ws.cell(row=1, column=3, value='Status')
 
             row=2
-            for data in vlan_set:
-                ws.cell(row=row, column=1, value=data['id'])
+            for data in vlan_list:
+                ws.cell(row=row, column=1, value=int(data['id']))
                 ws.cell(row=row, column=2, value=data['name'])
                 ws.cell(row=row, column=3, value=data['status'])
                 row += 1
