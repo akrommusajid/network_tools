@@ -1,4 +1,5 @@
 import sys
+import textfsm
 from pprint import pprint
 from openpyxl import load_workbook
 from openpyxl import Workbook
@@ -67,6 +68,48 @@ class SendCommand(object):
             return None
         else:
             return result
+
+    def up_interface(self):
+        interface_status_cmd = 'show interface status | exclude Po|disabled|notconnect'
+        interface_status_output = self.command(interface_status_cmd)
+
+        interface_re = re.compile(r'Te\S+|Gi\S+|Fa\S+')
+        interface = interface_re.findall(interface_status_output)
+
+        return interface
+
+    def traffic_interface(self):
+        up_interfaces = self.up_interface()
+        interfaces_rate = list()
+        interface_input_re = re.compile(r'input rate (\d+)')
+        interface_output_re = re.compile(r'output rate (\d+)')
+
+        for interface in up_interfaces:
+            
+            interface_rate = {
+                    'interface' : None,
+                    'input' : None,
+                    'output' : None
+                    }
+
+            interface_rate_cmd = 'show interface %s | i rate' % interface
+            interface_rate_output = self.command(interface_rate_cmd)
+            interface_input_rate = interface_input_re.search(interface_rate_output)
+            interface_output_rate = interface_output_re.search(interface_rate_output)
+            if interface_input_rate:
+                interface_rate['input'] = interface_input_rate.group(1)
+            else:
+                pass
+            
+            if interface_output_rate:
+                interface_rate['output'] = interface_output_rate.group(1)
+            else:
+                pass
+
+            interface_rate['interface'] = interface
+            interfaces_rate.append(interface_rate)
+
+        return interfaces_rate
 
     def mac_port(self):
         trk_list = self.trunk_port()
@@ -204,6 +247,8 @@ def int_vlan(output):
     intvlan = intvlan_re.findall(output)
 
     return intvlan
+
+
 def main():
     invent_file = 'data/inventory.xlsx'
     data_log = 'syslog/log.txt'
@@ -213,12 +258,15 @@ def main():
         print('please make sure you have fill inventory data in "data" directory')
         print('[1] collect software version')
         print('[2] collect address based on arp')
+        print('[3] bandiwdth usage')
+        print('[4] capture vlan database')
         print('[q] exit\n\n')
         input_select = input('please select function above :')
         input_select = str(input_select)
 
         if input_select == 'q' or input_select == 'Q':
             sys.exit()
+
         elif input_select == '1':
             '''create file software inventory'''
             wb = Workbook()
@@ -246,6 +294,7 @@ def main():
                 ws.cell(row=row, column=3, value=sw_inventory[0])
                 wb.save(swinvent_dir)
                 row += 1
+
         elif input_select == '2':
             dev_inventories = inventory(invent_file)
             address_invent = 'data/address_inventory.xlsx'
@@ -317,6 +366,53 @@ def main():
                     wb.save(address_invent)
                     row += 1
                     log('%s : %s\n' % (time_log(),mac), data_log)
+
+        elif input_select == '3':
+            traffic_file = 'data/traffic.xlsx'
+            wb = Workbook()
+            wb.save(traffic_file)
+            device_inventories = inventory(invent_file)
+            for host in device_inventories:
+                host_conn = SendCommand(host['hostname'], host['type'], host['address'], host['user'], host['pass'])
+                print('Collecting traffic rate')
+                rates = host_conn.traffic_interface()
+                wb = load_workbook(traffic_file)
+                ws = wb.create_sheet(host['hostname'])
+                ws.cell(row=1, column=1, value='interface')
+                ws.cell(row=1, column=2, value='input rate')
+                ws.cell(row=1, column=3, value='output rate')
+                row = 2
+                for rate in rates:
+                    ws.cell(row=row, column=1, value=rate['interface'])
+                    ws.cell(row=row, column=2, value=int(rate['input']))
+                    ws.cell(row=row, column=3, value=int(rate['output']))
+                    row += 1
+                ws.cell(row=row, column=1, value='Total')
+                wb.save(traffic_file)
+                print('Collecting data traffic successfully')
+        elif input_select == '4':
+            template = open('template/cisco_show_vlan.template')
+            result_template = textfsm.TextFSM(template)
+            device_inventories = inventory(invent_file)
+            vlan_list = list()
+            for host in device_inventories:
+                host_conn = SendCommand(host['hostname'], host['type'], host['address'], host['user'], host['pass'])
+                sh_vlan_cmd = 'show vlan'
+                output = host_conn.command(sh_vlan_cmd)
+                vlan_data = result_template.ParseText(output)
+                for vlan in vlan_data:
+                    vlan_dict = {
+                                'id' : None,
+                                'name' : None,
+                                'status' : None
+                            }
+                    vlan_dict['id'] = vlan[0]
+                    vlan_dict['name'] = vlan[1]
+                    vlan_dict['status'] = vlan[2]
+                    vlan_list.append(vlan_dict)
+                print('%s OK' % host['hostname'])
+            vlan_set = list({d['id'] : d for d in vlan_list}.values())
+            pprint(vlan_set)
         else:
             print('sorry, please choose function above..')
             time.sleep(3)
