@@ -377,6 +377,8 @@ def main():
             for host in device_inventories:
                 host_conn = SendCommand(host['hostname'], host['type'], host['address'], host['user'], host['pass'])
                 print('Collecting traffic rate')
+                print('%s : %s active interface : %s' % (time_log(), host['hostname'], str(host_conn.up_interface())))
+                log('%s active interface : %s\n' % (host['hostname'], str(host_conn.up_interface())), data_log)
                 rates = host_conn.traffic_interface()
                 wb = load_workbook(traffic_file)
                 ws = wb.create_sheet(host['hostname'])
@@ -386,7 +388,11 @@ def main():
                 row = 2
                 for rate in rates:
                     ws.cell(row=row, column=1, value=rate['interface'])
+                    if rate['input'] == None:
+                        continue
                     ws.cell(row=row, column=2, value=int(rate['input']))
+                    if rate['output'] == None:
+                        continue
                     ws.cell(row=row, column=3, value=int(rate['output']))
                     row += 1
                 ws.cell(row=row, column=1, value='Total')
